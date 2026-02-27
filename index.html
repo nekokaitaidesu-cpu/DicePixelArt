@@ -105,6 +105,36 @@
     flex-shrink: 0;
   }
 
+  /* ---- Toolbar collapse (mobile) ---- */
+  #toolbar-toggle {
+    display: none; /* shown via media query */
+    position: absolute;
+    bottom: -22px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    padding: 2px 14px 3px;
+    cursor: pointer;
+    font-size: 13px;
+    color: #aaa;
+    z-index: 20;
+    line-height: 1;
+  }
+  #toolbar-toggle:hover { color: #fff; }
+
+  #toolbar-wrap {
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  @media (max-width: 767px) {
+    #toolbar-toggle { display: block; }
+    #toolbar-wrap.collapsed #toolbar { display: none; }
+  }
+
   /* Modal for JSON load */
   #modal-overlay {
     display: none;
@@ -140,6 +170,7 @@
 </head>
 <body>
 
+<div id="toolbar-wrap">
 <div id="toolbar">
   <!-- Color -->
   <div class="tool-group">
@@ -217,7 +248,9 @@
     <button id="btn-load-json">JSON読込</button>
     <button id="btn-clear" style="color:#e74c3c;">全消去</button>
   </div>
-</div>
+</div><!-- #toolbar -->
+<button id="toolbar-toggle" title="ツールバーを開閉">▲</button>
+</div><!-- #toolbar-wrap -->
 
 <div id="canvas-wrap">
   <canvas id="main-canvas"></canvas>
@@ -829,8 +862,17 @@ wrap.addEventListener('touchstart', (e) => {
       STATE.panStartY = t.clientY;
       STATE.panStartOX = STATE.offsetX;
       STATE.panStartOY = STATE.offsetY;
+    } else if (STATE.tool === 'select') {
+      const { col, row } = screenToGrid(sx, sy);
+      STATE.selDragging = true;
+      STATE.selDragC1 = col; STATE.selDragR1 = row;
+      STATE.selDragC2 = col; STATE.selDragR2 = row;
+      STATE.selRect = null;
+      updateSelActions();
+      render();
     } else {
       STATE.isPainting = true;
+      STATE.historyPushed = false;
       const { col, row } = screenToGrid(sx, sy);
       if (tryOrientCycle(col, row)) {
         STATE.lastPaintCol = col;
@@ -873,6 +915,12 @@ wrap.addEventListener('touchmove', (e) => {
       STATE.offsetY = STATE.panStartOY + t.clientY - STATE.panStartY;
       clampViewport();
       render();
+    } else if (STATE.selDragging) {
+      const sx = t.clientX - rect.left;
+      const sy = t.clientY - rect.top;
+      const { col, row } = screenToGrid(sx, sy);
+      STATE.selDragC2 = col; STATE.selDragR2 = row;
+      render();
     } else if (STATE.isPainting) {
       const sx = t.clientX - rect.left;
       const sy = t.clientY - rect.top;
@@ -885,8 +933,18 @@ wrap.addEventListener('touchmove', (e) => {
 wrap.addEventListener('touchend', (e) => {
   STATE.touches = Array.from(e.touches);
   if (STATE.touches.length === 0) {
+    if (STATE.selDragging) {
+      STATE.selDragging = false;
+      STATE.selRect = normalizeSelRect(
+        STATE.selDragC1, STATE.selDragR1,
+        STATE.selDragC2, STATE.selDragR2
+      );
+      updateSelActions();
+      render();
+    }
     STATE.isPanning = false;
     STATE.isPainting = false;
+    STATE.historyPushed = false;
   }
 }, { passive: false });
 
@@ -1133,6 +1191,16 @@ function updateStatus() {
   document.getElementById('status-zoom').textContent = `ズーム: ${Math.round(STATE.scale * 100)}%`;
   document.getElementById('status-grid').textContent = `グリッド: ${STATE.cols}×${STATE.rows}`;
 }
+
+// ====== Toolbar collapse (mobile) ======
+const toolbarWrap = document.getElementById('toolbar-wrap');
+const toolbarToggleBtn = document.getElementById('toolbar-toggle');
+toolbarToggleBtn.addEventListener('click', () => {
+  const collapsed = toolbarWrap.classList.toggle('collapsed');
+  toolbarToggleBtn.textContent = collapsed ? '▼' : '▲';
+  // Resize canvas after layout change
+  setTimeout(resizeCanvas, 50);
+});
 
 // ====== Init ======
 resizeCanvas();
