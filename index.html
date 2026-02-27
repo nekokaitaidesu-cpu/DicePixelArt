@@ -202,7 +202,7 @@
   <span id="status-cursor">カーソル: -</span>
   <span id="status-zoom">ズーム: 100%</span>
   <span id="status-grid">グリッド: 60×60</span>
-  <span id="status-tip">Space+ドラッグ or 中ボタン: パン | ホイール: ズーム</span>
+  <span id="status-tip">Space+ドラッグ or 中ボタン: パン | ホイール: ズーム | 2/3/6の目を再クリック: 向き変更</span>
 </div>
 
 <!-- JSON Load Modal -->
@@ -269,6 +269,35 @@ function resizeCanvas() {
 }
 
 window.addEventListener('resize', resizeCanvas);
+
+// ====== Orientation cycling ======
+// pips that support orientation variants, with their cycle order
+const ORIENT_CYCLES = {
+  2: ['', 'f'],   // default(↘) → flipped(↙)
+  3: ['', 'f'],   // default(↘) → flipped(↙)
+  6: ['', 'r'],   // default(縦) → rotated(横)
+};
+
+// Try to cycle orientation of the cell if it matches current color+pip.
+// Returns true if cycled (so caller shouldn't start a fresh paint).
+function tryOrientCycle(col, row) {
+  if (col < 0 || col >= STATE.cols || row < 0 || row >= STATE.rows) return false;
+  if (STATE.pip === 0) return false;
+  const current = STATE.grid[row][col];
+  if (!current) return false;
+  const cellColor = current[0];
+  const cellPip   = parseInt(current[1]);
+  if (cellColor !== STATE.color || cellPip !== STATE.pip) return false;
+  const cycle = ORIENT_CYCLES[cellPip];
+  if (!cycle) return false;
+  const cellVariant = current.slice(2);
+  const idx = cycle.indexOf(cellVariant);
+  const nextVariant = cycle[(idx + 1) % cycle.length];
+  STATE.grid[row][col] = `${cellColor}${cellPip}${nextVariant}`;
+  autoSave();
+  render();
+  return true;
+}
 
 // ====== Rendering ======
 const CELL = 16; // base cell size in px
@@ -339,8 +368,9 @@ function render() {
 
 // Draw a single dice cell
 function drawDiceCell(ctx, x, y, cs, val) {
-  const color = val[0]; // 'b' or 'r'
-  const pip   = parseInt(val[1]);
+  const color   = val[0];           // 'b' or 'r'
+  const pip     = parseInt(val[1]); // 1-6
+  const variant = val.slice(2);     // '', 'f', or 'r'
 
   // Background
   ctx.fillStyle = '#ffffff';
@@ -355,7 +385,7 @@ function drawDiceCell(ctx, x, y, cs, val) {
   }
 
   const pipColor = color === 'b' ? '#222222' : '#c0392b';
-  drawPips(ctx, x, y, cs, pip, pipColor);
+  drawPips(ctx, x, y, cs, pip, variant, pipColor);
 }
 
 function roundRect(ctx, x, y, w, h, r) {
@@ -372,19 +402,30 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-// Pip positions: normalized [0,1] for each face
+// Pip positions: normalized [x,y] in [0,1] for each face + variant
+// key = pip number (as string) + variant suffix ('', 'f', 'r')
 const PIP_LAYOUTS = {
-  1: [[0.5, 0.5]],
-  2: [[0.25, 0.25], [0.75, 0.75]],
-  3: [[0.25, 0.25], [0.5, 0.5], [0.75, 0.75]],
-  4: [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]],
-  5: [[0.25, 0.25], [0.75, 0.25], [0.5, 0.5], [0.25, 0.75], [0.75, 0.75]],
-  6: [[0.25, 0.22], [0.75, 0.22], [0.25, 0.5], [0.75, 0.5], [0.25, 0.78], [0.75, 0.78]],
+  '1':  [[0.5, 0.5]],
+  // 2: default = top-left → bottom-right diagonal
+  '2':  [[0.25, 0.25], [0.75, 0.75]],
+  // 2f: flipped = top-right → bottom-left diagonal
+  '2f': [[0.75, 0.25], [0.25, 0.75]],
+  // 3: same diagonal as 2 + center
+  '3':  [[0.25, 0.25], [0.5, 0.5], [0.75, 0.75]],
+  // 3f: flipped diagonal + center
+  '3f': [[0.75, 0.25], [0.5, 0.5], [0.25, 0.75]],
+  '4':  [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]],
+  '5':  [[0.25, 0.25], [0.75, 0.25], [0.5, 0.5], [0.25, 0.75], [0.75, 0.75]],
+  // 6: default = vertical (2 cols × 3 rows)
+  '6':  [[0.25, 0.22], [0.75, 0.22], [0.25, 0.5], [0.75, 0.5], [0.25, 0.78], [0.75, 0.78]],
+  // 6r: rotated = horizontal (3 cols × 2 rows)
+  '6r': [[0.22, 0.25], [0.5, 0.25], [0.78, 0.25], [0.22, 0.75], [0.5, 0.75], [0.78, 0.75]],
 };
 
-function drawPips(ctx, x, y, cs, pip, color) {
+function drawPips(ctx, x, y, cs, pip, variant, color) {
   if (!pip || pip < 1 || pip > 6) return;
-  const positions = PIP_LAYOUTS[pip];
+  const key = `${pip}${variant}`;
+  const positions = PIP_LAYOUTS[key] || PIP_LAYOUTS[`${pip}`];
   const pipR = Math.max(1, cs * 0.1);
 
   ctx.fillStyle = color;
@@ -455,6 +496,7 @@ function paintAt(col, row) {
   STATE.lastPaintCol = col;
   STATE.lastPaintRow = row;
 
+  // Always place with default variant when painting (dragging)
   const val = STATE.pip === 0 ? null : `${STATE.color}${STATE.pip}`;
   STATE.grid[row][col] = val;
   autoSave();
@@ -479,10 +521,16 @@ wrap.addEventListener('mousedown', (e) => {
     wrap.classList.add('dragging');
   } else if (e.button === 0) {
     STATE.isPainting = true;
-    STATE.lastPaintCol = -1;
-    STATE.lastPaintRow = -1;
     const { col, row } = screenToGrid(sx, sy);
-    paintAt(col, row);
+    if (tryOrientCycle(col, row)) {
+      // cycled orientation – mark cell as visited so drag doesn't re-paint it
+      STATE.lastPaintCol = col;
+      STATE.lastPaintRow = row;
+    } else {
+      STATE.lastPaintCol = -1;
+      STATE.lastPaintRow = -1;
+      paintAt(col, row);
+    }
   }
 });
 
@@ -569,10 +617,15 @@ wrap.addEventListener('touchstart', (e) => {
       STATE.panStartOY = STATE.offsetY;
     } else {
       STATE.isPainting = true;
-      STATE.lastPaintCol = -1;
-      STATE.lastPaintRow = -1;
       const { col, row } = screenToGrid(sx, sy);
-      paintAt(col, row);
+      if (tryOrientCycle(col, row)) {
+        STATE.lastPaintCol = col;
+        STATE.lastPaintRow = row;
+      } else {
+        STATE.lastPaintCol = -1;
+        STATE.lastPaintRow = -1;
+        paintAt(col, row);
+      }
     }
   }
 }, { passive: false });
