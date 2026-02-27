@@ -58,10 +58,11 @@
     font-size: 16px;
     padding: 0;
   }
-  .color-btn.black-dice { background: #fff; color: #222; border: 2px solid #555; }
-  .color-btn.red-dice   { background: #fff; color: #c0392b; border: 2px solid #555; }
-  .color-btn.black-dice.active { border: 2px solid #e94560; }
-  .color-btn.red-dice.active   { border: 2px solid #e94560; }
+  .color-btn.c-b { background: #fff; color: #222222; border: 2px solid #555; }
+  .color-btn.c-r { background: #fff; color: #c0392b; border: 2px solid #555; }
+  .color-btn.c-w { background: #222; color: #ffffff; border: 2px solid #555; }
+  .color-btn.c-k { background: #222; color: #c0392b; border: 2px solid #555; }
+  .color-btn.active { border: 2px solid #e94560 !important; }
 
   .pip-btn {
     width: 28px; height: 28px;
@@ -143,8 +144,10 @@
   <!-- Color -->
   <div class="tool-group">
     <span class="tool-label">色</span>
-    <button class="color-btn black-dice active" id="btn-black" title="黒ダイス">⚀</button>
-    <button class="color-btn red-dice" id="btn-red" title="赤ダイス">⚀</button>
+    <button class="color-btn c-b active" data-color="b" title="白地・黒点">⚀</button>
+    <button class="color-btn c-r" data-color="r" title="白地・赤点">⚀</button>
+    <button class="color-btn c-w" data-color="w" title="黒地・白点">⚀</button>
+    <button class="color-btn c-k" data-color="k" title="黒地・赤点">⚀</button>
   </div>
 
   <!-- Pip -->
@@ -394,19 +397,27 @@ function drawDiceCell(ctx, x, y, cs, val) {
   const pip     = parseInt(val[1]); // 1-6
   const variant = val.slice(2);     // '', 'f', or 'r'
 
+  const darkBg  = color === 'w' || color === 'k';
+  const bgBase  = darkBg ? '#222222' : '#ffffff';
+  const bgShade = darkBg ? '#1a1a1a' : '#f8f8f8';
+  const pipColor =
+    color === 'b' ? '#222222' :
+    color === 'r' ? '#c0392b' :
+    color === 'w' ? '#ffffff' :
+    /* k */         '#c0392b';
+
   // Background
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = bgBase;
   ctx.fillRect(x, y, cs, cs);
 
-  // Rounded corners hint (clip) - only for larger cells
+  // Rounded corners hint - only for larger cells
   if (cs >= 8) {
     const r = Math.max(1, cs * 0.1);
     roundRect(ctx, x, y, cs, cs, r);
-    ctx.fillStyle = '#f8f8f8';
+    ctx.fillStyle = bgShade;
     ctx.fill();
   }
 
-  const pipColor = color === 'b' ? '#222222' : '#c0392b';
   drawPips(ctx, x, y, cs, pip, variant, pipColor);
 }
 
@@ -711,15 +722,12 @@ function pinchMid(ts, rect) {
 }
 
 // ====== Toolbar Buttons ======
-document.getElementById('btn-black').addEventListener('click', () => {
-  STATE.color = 'b';
-  document.getElementById('btn-black').classList.add('active');
-  document.getElementById('btn-red').classList.remove('active');
-});
-document.getElementById('btn-red').addEventListener('click', () => {
-  STATE.color = 'r';
-  document.getElementById('btn-red').classList.add('active');
-  document.getElementById('btn-black').classList.remove('active');
+document.querySelectorAll('.color-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    STATE.color = btn.dataset.color;
+    document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
 });
 
 document.querySelectorAll('.pip-btn').forEach(btn => {
