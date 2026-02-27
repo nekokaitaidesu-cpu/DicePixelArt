@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Dice Pixel Art Editor</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1a2e; color: #eee; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; height: 100dvh; overflow: hidden; user-select: none; }
+
+  #toolbar {
+    background: #16213e;
+    border-bottom: 1px solid #0f3460;
+    padding: 6px 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    flex-shrink: 0;
+    z-index: 10;
+  }
+
+  .tool-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    border-right: 1px solid #0f3460;
+    padding-right: 8px;
+  }
+  .tool-group:last-child { border-right: none; }
+
+  .tool-label {
+    font-size: 10px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+  }
+
+  button {
+    background: #0f3460;
+    color: #eee;
+    border: 1px solid #1a5276;
+    border-radius: 4px;
+    padding: 4px 8px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background 0.15s;
+    white-space: nowrap;
+  }
+  button:hover { background: #1a5276; }
+  button.active { background: #e94560; border-color: #e94560; color: #fff; }
+
+  .color-btn {
+    width: 28px; height: 28px;
+    border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+    padding: 0;
+  }
+  .color-btn.black-dice { background: #fff; color: #222; border: 2px solid #555; }
+  .color-btn.red-dice   { background: #fff; color: #c0392b; border: 2px solid #555; }
+  .color-btn.black-dice.active { border: 2px solid #e94560; }
+  .color-btn.red-dice.active   { border: 2px solid #e94560; }
+
+  .pip-btn {
+    width: 28px; height: 28px;
+    padding: 0;
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  #canvas-wrap {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+    cursor: crosshair;
+    background: #0d0d1a;
+  }
+  #canvas-wrap.panning { cursor: grab; }
+  #canvas-wrap.panning.dragging { cursor: grabbing; }
+
+  #main-canvas { position: absolute; top: 0; left: 0; }
+
+  #size-input {
+    width: 40px;
+    background: #0f3460;
+    color: #eee;
+    border: 1px solid #1a5276;
+    border-radius: 4px;
+    padding: 3px 5px;
+    font-size: 12px;
+    text-align: center;
+  }
+
+  #status-bar {
+    background: #16213e;
+    border-top: 1px solid #0f3460;
+    padding: 2px 8px;
+    font-size: 10px;
+    color: #888;
+    display: flex;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+
+  /* Modal for JSON load */
+  #modal-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+  }
+  #modal-overlay.show { display: flex; }
+  #modal-box {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 8px;
+    padding: 20px;
+    width: 90%;
+    max-width: 500px;
+  }
+  #modal-box h3 { margin-bottom: 10px; }
+  #modal-textarea {
+    width: 100%; height: 200px;
+    background: #0d0d1a;
+    color: #eee;
+    border: 1px solid #1a5276;
+    border-radius: 4px;
+    padding: 8px;
+    font-family: monospace;
+    font-size: 12px;
+    resize: vertical;
+  }
+  #modal-btns { display: flex; gap: 8px; margin-top: 10px; justify-content: flex-end; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <!-- Color -->
+  <div class="tool-group">
+    <span class="tool-label">色</span>
+    <button class="color-btn black-dice active" id="btn-black" title="黒ダイス">⚀</button>
+    <button class="color-btn red-dice" id="btn-red" title="赤ダイス">⚀</button>
+  </div>
+
+  <!-- Pip -->
+  <div class="tool-group">
+    <span class="tool-label">目</span>
+    <button class="pip-btn active" data-pip="1" title="1の目">1</button>
+    <button class="pip-btn" data-pip="2">2</button>
+    <button class="pip-btn" data-pip="3">3</button>
+    <button class="pip-btn" data-pip="4">4</button>
+    <button class="pip-btn" data-pip="5">5</button>
+    <button class="pip-btn" data-pip="6">6</button>
+    <button class="pip-btn" data-pip="0" title="消しゴム">✕</button>
+  </div>
+
+  <!-- Tool mode -->
+  <div class="tool-group">
+    <span class="tool-label">ツール</span>
+    <button id="btn-pencil" class="active" title="鉛筆">✏️</button>
+    <button id="btn-pan" title="移動">✋</button>
+  </div>
+
+  <!-- Zoom -->
+  <div class="tool-group">
+    <span class="tool-label">ズーム</span>
+    <button id="btn-zoom-in">＋</button>
+    <button id="btn-zoom-out">－</button>
+    <button id="btn-zoom-reset">1:1</button>
+    <button id="btn-zoom-fit">全体</button>
+  </div>
+
+  <!-- Grid size -->
+  <div class="tool-group">
+    <span class="tool-label">グリッド</span>
+    <input type="number" id="input-cols" class="size-input" value="60" min="5" max="200" title="列数">
+    <span style="font-size:11px;color:#888;">×</span>
+    <input type="number" id="input-rows" class="size-input" value="60" min="5" max="200" title="行数">
+    <button id="btn-apply-size">適用</button>
+  </div>
+
+  <!-- Save/Load -->
+  <div class="tool-group">
+    <span class="tool-label">保存</span>
+    <button id="btn-save-png">PNG</button>
+    <button id="btn-save-json">JSON保存</button>
+    <button id="btn-load-json">JSON読込</button>
+    <button id="btn-clear" style="color:#e74c3c;">全消去</button>
+  </div>
+</div>
+
+<div id="canvas-wrap">
+  <canvas id="main-canvas"></canvas>
+</div>
+
+<div id="status-bar">
+  <span id="status-cursor">カーソル: -</span>
+  <span id="status-zoom">ズーム: 100%</span>
+  <span id="status-grid">グリッド: 60×60</span>
+  <span id="status-tip">Space+ドラッグ or 中ボタン: パン | ホイール: ズーム</span>
+</div>
+
+<!-- JSON Load Modal -->
+<div id="modal-overlay">
+  <div id="modal-box">
+    <h3>JSONデータを貼り付け</h3>
+    <textarea id="modal-textarea" placeholder='{"version":1,"cols":60,"rows":60,"grid":[[...],...]}' spellcheck="false"></textarea>
+    <div id="modal-btns">
+      <button id="modal-cancel">キャンセル</button>
+      <button id="modal-ok" style="background:#27ae60;border-color:#27ae60;">読み込む</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ====== State ======
+const STATE = {
+  cols: 60,
+  rows: 60,
+  grid: null,       // 2D array [row][col] = "b1"|"r3"|null
+  color: 'b',       // 'b' or 'r'
+  pip: 1,           // 1-6, 0=eraser
+  tool: 'pencil',   // 'pencil' | 'pan'
+  // Viewport
+  offsetX: 0,
+  offsetY: 0,
+  scale: 1,
+  // Interaction
+  isPainting: false,
+  isPanning: false,
+  panStartX: 0,
+  panStartY: 0,
+  panStartOX: 0,
+  panStartOY: 0,
+  spaceDown: false,
+  lastPaintCol: -1,
+  lastPaintRow: -1,
+  // Touch
+  touches: [],
+  lastPinchDist: 0,
+};
+
+function initGrid(cols, rows) {
+  const g = [];
+  for (let r = 0; r < rows; r++) {
+    g.push(new Array(cols).fill(null));
+  }
+  return g;
+}
+
+STATE.grid = initGrid(STATE.cols, STATE.rows);
+
+// ====== Canvas Setup ======
+const wrap = document.getElementById('canvas-wrap');
+const canvas = document.getElementById('main-canvas');
+const ctx = canvas.getContext('2d');
+
+function resizeCanvas() {
+  canvas.width = wrap.clientWidth;
+  canvas.height = wrap.clientHeight;
+  render();
+}
+
+window.addEventListener('resize', resizeCanvas);
+
+// ====== Rendering ======
+const CELL = 16; // base cell size in px
+
+function cellSize() {
+  return Math.max(2, Math.round(CELL * STATE.scale));
+}
+
+function render() {
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  // Background
+  ctx.fillStyle = '#111';
+  ctx.fillRect(0, 0, W, H);
+
+  const cs = cellSize();
+  const ox = STATE.offsetX, oy = STATE.offsetY;
+
+  // Visible range
+  const colStart = Math.max(0, Math.floor(-ox / cs));
+  const rowStart = Math.max(0, Math.floor(-oy / cs));
+  const colEnd   = Math.min(STATE.cols, Math.ceil((W - ox) / cs) + 1);
+  const rowEnd   = Math.min(STATE.rows, Math.ceil((H - oy) / cs) + 1);
+
+  // Draw cells
+  for (let r = rowStart; r < rowEnd; r++) {
+    for (let c = colStart; c < colEnd; c++) {
+      const x = ox + c * cs;
+      const y = oy + r * cs;
+      const val = STATE.grid[r][c];
+
+      if (val) {
+        drawDiceCell(ctx, x, y, cs, val);
+      } else {
+        // Empty cell - subtle checker
+        ctx.fillStyle = (r + c) % 2 === 0 ? '#1a1a2e' : '#16213e';
+        ctx.fillRect(x, y, cs, cs);
+      }
+    }
+  }
+
+  // Grid lines (only when big enough)
+  if (cs >= 6) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 0.5;
+    const step = cs >= 3 ? cs : cs * 2;
+
+    ctx.beginPath();
+    for (let c = colStart; c <= colEnd; c++) {
+      const x = ox + c * cs + 0.5;
+      ctx.moveTo(x, oy + rowStart * cs);
+      ctx.lineTo(x, oy + rowEnd * cs);
+    }
+    for (let r = rowStart; r <= rowEnd; r++) {
+      const y = oy + r * cs + 0.5;
+      ctx.moveTo(ox + colStart * cs, y);
+      ctx.lineTo(ox + colEnd * cs, y);
+    }
+    ctx.stroke();
+  }
+
+  // Border around whole grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(ox + 0.5, oy + 0.5, STATE.cols * cs - 1, STATE.rows * cs - 1);
+}
+
+// Draw a single dice cell
+function drawDiceCell(ctx, x, y, cs, val) {
+  const color = val[0]; // 'b' or 'r'
+  const pip   = parseInt(val[1]);
+
+  // Background
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(x, y, cs, cs);
+
+  // Rounded corners hint (clip) - only for larger cells
+  if (cs >= 8) {
+    const r = Math.max(1, cs * 0.1);
+    roundRect(ctx, x, y, cs, cs, r);
+    ctx.fillStyle = '#f8f8f8';
+    ctx.fill();
+  }
+
+  const pipColor = color === 'b' ? '#222222' : '#c0392b';
+  drawPips(ctx, x, y, cs, pip, pipColor);
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+// Pip positions: normalized [0,1] for each face
+const PIP_LAYOUTS = {
+  1: [[0.5, 0.5]],
+  2: [[0.25, 0.25], [0.75, 0.75]],
+  3: [[0.25, 0.25], [0.5, 0.5], [0.75, 0.75]],
+  4: [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]],
+  5: [[0.25, 0.25], [0.75, 0.25], [0.5, 0.5], [0.25, 0.75], [0.75, 0.75]],
+  6: [[0.25, 0.22], [0.75, 0.22], [0.25, 0.5], [0.75, 0.5], [0.25, 0.78], [0.75, 0.78]],
+};
+
+function drawPips(ctx, x, y, cs, pip, color) {
+  if (!pip || pip < 1 || pip > 6) return;
+  const positions = PIP_LAYOUTS[pip];
+  const pipR = Math.max(1, cs * 0.1);
+
+  ctx.fillStyle = color;
+  for (const [nx, ny] of positions) {
+    const px = x + nx * cs;
+    const py = y + ny * cs;
+    ctx.beginPath();
+    ctx.arc(px, py, pipR, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// ====== Viewport helpers ======
+function screenToGrid(sx, sy) {
+  const cs = cellSize();
+  const col = Math.floor((sx - STATE.offsetX) / cs);
+  const row = Math.floor((sy - STATE.offsetY) / cs);
+  return { col, row };
+}
+
+function clampViewport() {
+  const cs = cellSize();
+  const W = canvas.width, H = canvas.height;
+  const gw = STATE.cols * cs, gh = STATE.rows * cs;
+  // Allow some overshoot (half viewport)
+  STATE.offsetX = Math.min(W * 0.5, Math.max(W * 0.5 - gw, STATE.offsetX));
+  STATE.offsetY = Math.min(H * 0.5, Math.max(H * 0.5 - gh, STATE.offsetY));
+}
+
+function zoomAround(factor, cx, cy) {
+  const oldScale = STATE.scale;
+  STATE.scale = Math.min(16, Math.max(0.1, STATE.scale * factor));
+  const sf = STATE.scale / oldScale;
+  STATE.offsetX = cx - sf * (cx - STATE.offsetX);
+  STATE.offsetY = cy - sf * (cy - STATE.offsetY);
+  clampViewport();
+  updateStatus();
+  render();
+}
+
+function fitToScreen() {
+  const W = canvas.width, H = canvas.height;
+  const margin = 20;
+  const scaleX = (W - margin * 2) / (STATE.cols * CELL);
+  const scaleY = (H - margin * 2) / (STATE.rows * CELL);
+  STATE.scale = Math.min(scaleX, scaleY, 1);
+  const cs = cellSize();
+  STATE.offsetX = Math.round((W - STATE.cols * cs) / 2);
+  STATE.offsetY = Math.round((H - STATE.rows * cs) / 2);
+  updateStatus();
+  render();
+}
+
+function resetZoom() {
+  STATE.scale = 1;
+  const W = canvas.width, H = canvas.height;
+  const cs = cellSize();
+  STATE.offsetX = Math.round((W - STATE.cols * cs) / 2);
+  STATE.offsetY = Math.round((H - STATE.rows * cs) / 2);
+  updateStatus();
+  render();
+}
+
+// ====== Paint ======
+function paintAt(col, row) {
+  if (col < 0 || col >= STATE.cols || row < 0 || row >= STATE.rows) return;
+  if (col === STATE.lastPaintCol && row === STATE.lastPaintRow) return;
+  STATE.lastPaintCol = col;
+  STATE.lastPaintRow = row;
+
+  const val = STATE.pip === 0 ? null : `${STATE.color}${STATE.pip}`;
+  STATE.grid[row][col] = val;
+  autoSave();
+  render();
+}
+
+// ====== Mouse Events ======
+wrap.addEventListener('mousedown', (e) => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left;
+  const sy = e.clientY - rect.top;
+
+  const panMode = STATE.tool === 'pan' || STATE.spaceDown || e.button === 1;
+
+  if (panMode) {
+    STATE.isPanning = true;
+    STATE.panStartX = e.clientX;
+    STATE.panStartY = e.clientY;
+    STATE.panStartOX = STATE.offsetX;
+    STATE.panStartOY = STATE.offsetY;
+    wrap.classList.add('dragging');
+  } else if (e.button === 0) {
+    STATE.isPainting = true;
+    STATE.lastPaintCol = -1;
+    STATE.lastPaintRow = -1;
+    const { col, row } = screenToGrid(sx, sy);
+    paintAt(col, row);
+  }
+});
+
+window.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left;
+  const sy = e.clientY - rect.top;
+
+  if (STATE.isPanning) {
+    STATE.offsetX = STATE.panStartOX + e.clientX - STATE.panStartX;
+    STATE.offsetY = STATE.panStartOY + e.clientY - STATE.panStartY;
+    clampViewport();
+    render();
+  } else if (STATE.isPainting) {
+    const { col, row } = screenToGrid(sx, sy);
+    paintAt(col, row);
+  }
+
+  // Update cursor status
+  const { col, row } = screenToGrid(sx, sy);
+  if (col >= 0 && col < STATE.cols && row >= 0 && row < STATE.rows) {
+    document.getElementById('status-cursor').textContent = `カーソル: (${col+1}, ${row+1})`;
+  } else {
+    document.getElementById('status-cursor').textContent = 'カーソル: -';
+  }
+});
+
+window.addEventListener('mouseup', (e) => {
+  STATE.isPanning = false;
+  STATE.isPainting = false;
+  wrap.classList.remove('dragging');
+});
+
+wrap.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const cx = e.clientX - rect.left;
+  const cy = e.clientY - rect.top;
+  const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+  zoomAround(factor, cx, cy);
+}, { passive: false });
+
+// Space pan
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' && !e.target.matches('input, textarea')) {
+    STATE.spaceDown = true;
+    wrap.classList.add('panning');
+    e.preventDefault();
+  }
+});
+window.addEventListener('keyup', (e) => {
+  if (e.code === 'Space') {
+    STATE.spaceDown = false;
+    wrap.classList.remove('panning');
+  }
+});
+
+// Prevent middle-click scroll
+wrap.addEventListener('auxclick', (e) => { if (e.button === 1) e.preventDefault(); });
+
+// ====== Touch Events ======
+wrap.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  STATE.touches = Array.from(e.touches);
+  if (STATE.touches.length === 2) {
+    STATE.lastPinchDist = pinchDist(STATE.touches);
+    STATE.isPainting = false;
+    // start pan reference
+    const mid = pinchMid(STATE.touches, canvas.getBoundingClientRect());
+    STATE.panStartX = mid.x;
+    STATE.panStartY = mid.y;
+    STATE.panStartOX = STATE.offsetX;
+    STATE.panStartOY = STATE.offsetY;
+  } else if (STATE.touches.length === 1) {
+    const rect = canvas.getBoundingClientRect();
+    const t = STATE.touches[0];
+    const sx = t.clientX - rect.left;
+    const sy = t.clientY - rect.top;
+    if (STATE.tool === 'pan') {
+      STATE.isPanning = true;
+      STATE.panStartX = t.clientX;
+      STATE.panStartY = t.clientY;
+      STATE.panStartOX = STATE.offsetX;
+      STATE.panStartOY = STATE.offsetY;
+    } else {
+      STATE.isPainting = true;
+      STATE.lastPaintCol = -1;
+      STATE.lastPaintRow = -1;
+      const { col, row } = screenToGrid(sx, sy);
+      paintAt(col, row);
+    }
+  }
+}, { passive: false });
+
+wrap.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  const touches = Array.from(e.touches);
+  const rect = canvas.getBoundingClientRect();
+
+  if (touches.length === 2) {
+    const dist = pinchDist(touches);
+    const factor = dist / STATE.lastPinchDist;
+    STATE.lastPinchDist = dist;
+    const mid = pinchMid(touches, rect);
+    // Pan
+    STATE.offsetX = STATE.panStartOX + mid.x - STATE.panStartX;
+    STATE.offsetY = STATE.panStartOY + mid.y - STATE.panStartY;
+    // Zoom around midpoint
+    const oldScale = STATE.scale;
+    STATE.scale = Math.min(16, Math.max(0.1, STATE.scale * factor));
+    const sf = STATE.scale / oldScale;
+    STATE.offsetX = mid.x - sf * (mid.x - STATE.offsetX);
+    STATE.offsetY = mid.y - sf * (mid.y - STATE.offsetY);
+    clampViewport();
+    updateStatus();
+    render();
+  } else if (touches.length === 1) {
+    const t = touches[0];
+    if (STATE.isPanning) {
+      STATE.offsetX = STATE.panStartOX + t.clientX - STATE.panStartX;
+      STATE.offsetY = STATE.panStartOY + t.clientY - STATE.panStartY;
+      clampViewport();
+      render();
+    } else if (STATE.isPainting) {
+      const sx = t.clientX - rect.left;
+      const sy = t.clientY - rect.top;
+      const { col, row } = screenToGrid(sx, sy);
+      paintAt(col, row);
+    }
+  }
+}, { passive: false });
+
+wrap.addEventListener('touchend', (e) => {
+  STATE.touches = Array.from(e.touches);
+  if (STATE.touches.length === 0) {
+    STATE.isPanning = false;
+    STATE.isPainting = false;
+  }
+}, { passive: false });
+
+function pinchDist(ts) {
+  const dx = ts[0].clientX - ts[1].clientX;
+  const dy = ts[0].clientY - ts[1].clientY;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+function pinchMid(ts, rect) {
+  return {
+    x: (ts[0].clientX + ts[1].clientX) / 2 - rect.left,
+    y: (ts[0].clientY + ts[1].clientY) / 2 - rect.top,
+  };
+}
+
+// ====== Toolbar Buttons ======
+document.getElementById('btn-black').addEventListener('click', () => {
+  STATE.color = 'b';
+  document.getElementById('btn-black').classList.add('active');
+  document.getElementById('btn-red').classList.remove('active');
+});
+document.getElementById('btn-red').addEventListener('click', () => {
+  STATE.color = 'r';
+  document.getElementById('btn-red').classList.add('active');
+  document.getElementById('btn-black').classList.remove('active');
+});
+
+document.querySelectorAll('.pip-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    STATE.pip = parseInt(btn.dataset.pip);
+    document.querySelectorAll('.pip-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    // Switch to pencil mode automatically
+    if (STATE.pip !== 0) setTool('pencil');
+  });
+});
+
+function setTool(tool) {
+  STATE.tool = tool;
+  document.getElementById('btn-pencil').classList.toggle('active', tool === 'pencil');
+  document.getElementById('btn-pan').classList.toggle('active', tool === 'pan');
+  wrap.classList.toggle('panning', tool === 'pan');
+}
+
+document.getElementById('btn-pencil').addEventListener('click', () => setTool('pencil'));
+document.getElementById('btn-pan').addEventListener('click', () => setTool('pan'));
+
+document.getElementById('btn-zoom-in').addEventListener('click', () => {
+  const cx = canvas.width / 2, cy = canvas.height / 2;
+  zoomAround(1.5, cx, cy);
+});
+document.getElementById('btn-zoom-out').addEventListener('click', () => {
+  const cx = canvas.width / 2, cy = canvas.height / 2;
+  zoomAround(1 / 1.5, cx, cy);
+});
+document.getElementById('btn-zoom-reset').addEventListener('click', resetZoom);
+document.getElementById('btn-zoom-fit').addEventListener('click', fitToScreen);
+
+document.getElementById('btn-apply-size').addEventListener('click', () => {
+  const newCols = parseInt(document.getElementById('input-cols').value);
+  const newRows = parseInt(document.getElementById('input-rows').value);
+  if (newCols < 5 || newCols > 200 || newRows < 5 || newRows > 200) {
+    alert('グリッドサイズは5〜200の範囲で入力してください。');
+    return;
+  }
+  if (!confirm(`グリッドを ${newCols}×${newRows} に変更します。現在の絵はリセットされます。よろしいですか？`)) return;
+  STATE.cols = newCols;
+  STATE.rows = newRows;
+  STATE.grid = initGrid(newCols, newRows);
+  autoSave();
+  updateStatus();
+  fitToScreen();
+});
+
+document.getElementById('btn-clear').addEventListener('click', () => {
+  if (!confirm('すべて消去しますか？')) return;
+  STATE.grid = initGrid(STATE.cols, STATE.rows);
+  autoSave();
+  render();
+});
+
+// ====== Save / Load ======
+document.getElementById('btn-save-png').addEventListener('click', savePng);
+document.getElementById('btn-save-json').addEventListener('click', saveJson);
+document.getElementById('btn-load-json').addEventListener('click', () => {
+  document.getElementById('modal-overlay').classList.add('show');
+  document.getElementById('modal-textarea').value = '';
+  document.getElementById('modal-textarea').focus();
+});
+
+document.getElementById('modal-cancel').addEventListener('click', () => {
+  document.getElementById('modal-overlay').classList.remove('show');
+});
+document.getElementById('modal-ok').addEventListener('click', () => {
+  try {
+    const data = JSON.parse(document.getElementById('modal-textarea').value);
+    loadFromData(data);
+    document.getElementById('modal-overlay').classList.remove('show');
+  } catch (err) {
+    alert('JSONの解析に失敗しました: ' + err.message);
+  }
+});
+
+function savePng() {
+  const EXPORT_CELL = 40;
+  const W = STATE.cols * EXPORT_CELL;
+  const H = STATE.rows * EXPORT_CELL;
+  const offCanvas = document.createElement('canvas');
+  offCanvas.width = W;
+  offCanvas.height = H;
+  const offCtx = offCanvas.getContext('2d');
+
+  offCtx.fillStyle = '#cccccc';
+  offCtx.fillRect(0, 0, W, H);
+
+  for (let r = 0; r < STATE.rows; r++) {
+    for (let c = 0; c < STATE.cols; c++) {
+      const val = STATE.grid[r][c];
+      const x = c * EXPORT_CELL;
+      const y = r * EXPORT_CELL;
+      if (val) {
+        drawDiceCell(offCtx, x, y, EXPORT_CELL, val);
+      } else {
+        offCtx.fillStyle = (r + c) % 2 === 0 ? '#e8e8e8' : '#d0d0d0';
+        offCtx.fillRect(x, y, EXPORT_CELL, EXPORT_CELL);
+      }
+    }
+  }
+
+  // Grid lines
+  offCtx.strokeStyle = 'rgba(0,0,0,0.15)';
+  offCtx.lineWidth = 0.5;
+  for (let c = 0; c <= STATE.cols; c++) {
+    offCtx.beginPath();
+    offCtx.moveTo(c * EXPORT_CELL + 0.5, 0);
+    offCtx.lineTo(c * EXPORT_CELL + 0.5, H);
+    offCtx.stroke();
+  }
+  for (let r = 0; r <= STATE.rows; r++) {
+    offCtx.beginPath();
+    offCtx.moveTo(0, r * EXPORT_CELL + 0.5);
+    offCtx.lineTo(W, r * EXPORT_CELL + 0.5);
+    offCtx.stroke();
+  }
+
+  const a = document.createElement('a');
+  a.download = `dice-pixel-art-${STATE.cols}x${STATE.rows}.png`;
+  a.href = offCanvas.toDataURL('image/png');
+  a.click();
+}
+
+function getDataObj() {
+  return {
+    version: 1,
+    cols: STATE.cols,
+    rows: STATE.rows,
+    grid: STATE.grid.map(row => row.map(v => v === null ? null : v)),
+  };
+}
+
+function saveJson() {
+  const data = getDataObj();
+  const json = JSON.stringify(data);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.download = `dice-pixel-art-${STATE.cols}x${STATE.rows}.json`;
+  a.href = url;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function loadFromData(data) {
+  if (!data.version || !data.cols || !data.rows || !data.grid) {
+    throw new Error('不正なデータ形式です');
+  }
+  STATE.cols = data.cols;
+  STATE.rows = data.rows;
+  STATE.grid = data.grid;
+  document.getElementById('input-cols').value = STATE.cols;
+  document.getElementById('input-rows').value = STATE.rows;
+  autoSave();
+  updateStatus();
+  fitToScreen();
+}
+
+// ====== AutoSave (LocalStorage) ======
+const LS_KEY = 'dice-pixel-art-autosave';
+
+function autoSave() {
+  try {
+    const data = getDataObj();
+    localStorage.setItem(LS_KEY, JSON.stringify(data));
+  } catch (e) { /* quota exceeded */ }
+}
+
+function autoLoad() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+    if (data.cols && data.rows && data.grid) {
+      STATE.cols = data.cols;
+      STATE.rows = data.rows;
+      STATE.grid = data.grid;
+      document.getElementById('input-cols').value = STATE.cols;
+      document.getElementById('input-rows').value = STATE.rows;
+      return true;
+    }
+  } catch (e) {}
+  return false;
+}
+
+// ====== Status Bar ======
+function updateStatus() {
+  document.getElementById('status-zoom').textContent = `ズーム: ${Math.round(STATE.scale * 100)}%`;
+  document.getElementById('status-grid').textContent = `グリッド: ${STATE.cols}×${STATE.rows}`;
+}
+
+// ====== Init ======
+resizeCanvas();
+if (autoLoad()) {
+  fitToScreen();
+} else {
+  fitToScreen();
+}
+updateStatus();
+</script>
+</body>
+</html>
