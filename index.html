@@ -206,6 +206,7 @@
     <span class="tool-label">選択</span>
     <button id="btn-sel-delete" title="選択範囲を削除" style="color:#e74c3c;">✕削除</button>
     <button id="btn-sel-copy" title="選択範囲をコピー">📋コピー</button>
+    <button id="btn-sel-cut" title="選択範囲を切り取り">✂️切取</button>
     <button id="btn-sel-paste" title="貼り付け" style="display:none;">📌貼付</button>
   </div>
 
@@ -404,6 +405,7 @@ function updateSelActions() {
   document.getElementById('sel-actions').style.display = (hasSel || hasClip) ? '' : 'none';
   document.getElementById('btn-sel-delete').style.display = hasSel ? '' : 'none';
   document.getElementById('btn-sel-copy').style.display   = hasSel ? '' : 'none';
+  document.getElementById('btn-sel-cut').style.display    = hasSel ? '' : 'none';
   document.getElementById('btn-sel-paste').style.display  = hasClip ? '' : 'none';
 }
 
@@ -418,6 +420,11 @@ function selDelete() {
   updateSelActions();
   autoSave();
   render();
+}
+
+function selCut() {
+  selCopy();    // copy to clipboard first
+  selDelete();  // then delete (pushes history internally)
 }
 
 function selCopy() {
@@ -1012,6 +1019,7 @@ document.getElementById('btn-select').addEventListener('click', () => setTool('s
 // Selection actions
 document.getElementById('btn-sel-delete').addEventListener('click', selDelete);
 document.getElementById('btn-sel-copy').addEventListener('click', selCopy);
+document.getElementById('btn-sel-cut').addEventListener('click', selCut);
 document.getElementById('btn-sel-paste').addEventListener('click', selPaste);
 
 // Undo
