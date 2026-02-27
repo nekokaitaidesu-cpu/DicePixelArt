@@ -184,6 +184,14 @@
     <button id="btn-apply-size">適用</button>
   </div>
 
+  <!-- Background -->
+  <div class="tool-group">
+    <span class="tool-label">背景</span>
+    <button class="bg-btn active" data-bg="checker" title="タイルマス目">▦</button>
+    <button class="bg-btn" data-bg="black" title="真っ黒" style="background:#000;color:#fff;border-color:#444;">■</button>
+    <button class="bg-btn" data-bg="white" title="真っ白" style="background:#fff;color:#000;border-color:#aaa;">□</button>
+  </div>
+
   <!-- Save/Load -->
   <div class="tool-group">
     <span class="tool-label">保存</span>
@@ -228,6 +236,7 @@ const STATE = {
   color: 'b',       // 'b' or 'r'
   pip: 1,           // 1-6, 0=eraser
   tool: 'pencil',   // 'pencil' | 'pan'
+  bg: 'checker',    // 'checker' | 'black' | 'white'
   // Viewport
   offsetX: 0,
   offsetY: 0,
@@ -299,6 +308,20 @@ function tryOrientCycle(col, row) {
   return true;
 }
 
+// ====== Background helpers ======
+function emptyColor(r, c) {
+  if (STATE.bg === 'black') return '#000000';
+  if (STATE.bg === 'white') return '#ffffff';
+  // checker
+  return (r + c) % 2 === 0 ? '#1a1a2e' : '#16213e';
+}
+function emptyColorExport(r, c) {
+  if (STATE.bg === 'black') return '#000000';
+  if (STATE.bg === 'white') return '#ffffff';
+  // checker (slightly lighter for export readability)
+  return (r + c) % 2 === 0 ? '#e8e8e8' : '#d0d0d0';
+}
+
 // ====== Rendering ======
 const CELL = 16; // base cell size in px
 
@@ -333,8 +356,7 @@ function render() {
       if (val) {
         drawDiceCell(ctx, x, y, cs, val);
       } else {
-        // Empty cell - subtle checker
-        ctx.fillStyle = (r + c) % 2 === 0 ? '#1a1a2e' : '#16213e';
+        ctx.fillStyle = emptyColor(r, c);
         ctx.fillRect(x, y, cs, cs);
       }
     }
@@ -717,6 +739,16 @@ function setTool(tool) {
   wrap.classList.toggle('panning', tool === 'pan');
 }
 
+// Background buttons
+document.querySelectorAll('.bg-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    STATE.bg = btn.dataset.bg;
+    document.querySelectorAll('.bg-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    render();
+  });
+});
+
 document.getElementById('btn-pencil').addEventListener('click', () => setTool('pencil'));
 document.getElementById('btn-pan').addEventListener('click', () => setTool('pan'));
 
@@ -785,7 +817,8 @@ function savePng() {
   offCanvas.height = H;
   const offCtx = offCanvas.getContext('2d');
 
-  offCtx.fillStyle = '#cccccc';
+  // Fill base background for solid modes
+  offCtx.fillStyle = STATE.bg === 'black' ? '#000000' : STATE.bg === 'white' ? '#ffffff' : '#cccccc';
   offCtx.fillRect(0, 0, W, H);
 
   for (let r = 0; r < STATE.rows; r++) {
@@ -796,7 +829,7 @@ function savePng() {
       if (val) {
         drawDiceCell(offCtx, x, y, EXPORT_CELL, val);
       } else {
-        offCtx.fillStyle = (r + c) % 2 === 0 ? '#e8e8e8' : '#d0d0d0';
+        offCtx.fillStyle = emptyColorExport(r, c);
         offCtx.fillRect(x, y, EXPORT_CELL, EXPORT_CELL);
       }
     }
