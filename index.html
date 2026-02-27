@@ -167,6 +167,20 @@
     <span class="tool-label">ツール</span>
     <button id="btn-pencil" class="active" title="鉛筆">✏️</button>
     <button id="btn-pan" title="移動">✋</button>
+    <button id="btn-select" title="範囲選択">⬚</button>
+  </div>
+
+  <!-- Selection actions (shown when selection active) -->
+  <div class="tool-group" id="sel-actions" style="display:none;">
+    <span class="tool-label">選択</span>
+    <button id="btn-sel-delete" title="選択範囲を削除" style="color:#e74c3c;">✕削除</button>
+    <button id="btn-sel-copy" title="選択範囲をコピー">📋コピー</button>
+    <button id="btn-sel-paste" title="貼り付け" style="display:none;">📌貼付</button>
+  </div>
+
+  <!-- Undo -->
+  <div class="tool-group">
+    <button id="btn-undo" title="元に戻す (Ctrl+Z)">↩ 戻る</button>
   </div>
 
   <!-- Zoom -->
@@ -238,8 +252,17 @@ const STATE = {
   grid: null,       // 2D array [row][col] = "b1"|"r3"|null
   color: 'b',       // 'b' or 'r'
   pip: 1,           // 1-6, 0=eraser
-  tool: 'pencil',   // 'pencil' | 'pan'
+  tool: 'pencil',   // 'pencil' | 'pan' | 'select'
   bg: 'checker',    // 'checker' | 'black' | 'white'
+  // History (undo)
+  history: [],      // array of grid snapshots
+  historyPushed: false, // guard: push only once per stroke
+  // Selection
+  selRect: null,    // {c1,r1,c2,r2} normalized grid coords, or null
+  selDragging: false,
+  selDragC1: 0, selDragR1: 0,
+  selDragC2: 0, selDragR2: 0,
+  clipboard: null,  // 2D array (rows×cols) of cell values
   // Viewport
   offsetX: 0,
   offsetY: 0,
@@ -305,10 +328,110 @@ function tryOrientCycle(col, row) {
   const cellVariant = current.slice(2);
   const idx = cycle.indexOf(cellVariant);
   const nextVariant = cycle[(idx + 1) % cycle.length];
+  pushHistory();
   STATE.grid[row][col] = `${cellColor}${cellPip}${nextVariant}`;
   autoSave();
   render();
   return true;
+}
+
+// ====== History (Undo) ======
+const MAX_HISTORY = 50;
+
+function pushHistory() {
+  const snapshot = STATE.grid.map(r => [...r]);
+  STATE.history.push(snapshot);
+  if (STATE.history.length > MAX_HISTORY) STATE.history.shift();
+  document.getElementById('btn-undo').disabled = false;
+}
+
+function undo() {
+  if (!STATE.history.length) return;
+  STATE.grid = STATE.history.pop().map(r => [...r]);
+  if (!STATE.history.length) document.getElementById('btn-undo').disabled = true;
+  STATE.selRect = null;
+  updateSelActions();
+  autoSave();
+  render();
+}
+
+// ====== Selection helpers ======
+function normalizeSelRect(c1, r1, c2, r2) {
+  return {
+    c1: Math.max(0, Math.min(c1, c2)),
+    r1: Math.max(0, Math.min(r1, r2)),
+    c2: Math.min(STATE.cols - 1, Math.max(c1, c2)),
+    r2: Math.min(STATE.rows - 1, Math.max(r1, r2)),
+  };
+}
+
+function updateSelActions() {
+  const hasSel = !!STATE.selRect;
+  const hasClip = !!STATE.clipboard;
+  document.getElementById('sel-actions').style.display = (hasSel || hasClip) ? '' : 'none';
+  document.getElementById('btn-sel-delete').style.display = hasSel ? '' : 'none';
+  document.getElementById('btn-sel-copy').style.display   = hasSel ? '' : 'none';
+  document.getElementById('btn-sel-paste').style.display  = hasClip ? '' : 'none';
+}
+
+function selDelete() {
+  if (!STATE.selRect) return;
+  pushHistory();
+  const { c1, r1, c2, r2 } = STATE.selRect;
+  for (let r = r1; r <= r2; r++)
+    for (let c = c1; c <= c2; c++)
+      STATE.grid[r][c] = null;
+  STATE.selRect = null;
+  updateSelActions();
+  autoSave();
+  render();
+}
+
+function selCopy() {
+  if (!STATE.selRect) return;
+  const { c1, r1, c2, r2 } = STATE.selRect;
+  STATE.clipboard = [];
+  for (let r = r1; r <= r2; r++) {
+    const row = [];
+    for (let c = c1; c <= c2; c++) row.push(STATE.grid[r][c]);
+    STATE.clipboard.push(row);
+  }
+  updateSelActions();
+}
+
+function selPaste() {
+  if (!STATE.clipboard) return;
+  pushHistory();
+  // Paste at selection origin if present, else top-left of visible area
+  let destC = 0, destR = 0;
+  if (STATE.selRect) {
+    destC = STATE.selRect.c1;
+    destR = STATE.selRect.r1;
+  } else {
+    const cs = cellSize();
+    destC = Math.max(0, Math.floor(-STATE.offsetX / cs));
+    destR = Math.max(0, Math.floor(-STATE.offsetY / cs));
+  }
+  const clipRows = STATE.clipboard.length;
+  const clipCols = STATE.clipboard[0].length;
+  for (let r = 0; r < clipRows; r++) {
+    const gr = destR + r;
+    if (gr >= STATE.rows) break;
+    for (let c = 0; c < clipCols; c++) {
+      const gc = destC + c;
+      if (gc >= STATE.cols) break;
+      STATE.grid[gr][gc] = STATE.clipboard[r][c];
+    }
+  }
+  // Set selection to pasted area
+  STATE.selRect = normalizeSelRect(
+    destC, destR,
+    Math.min(STATE.cols - 1, destC + clipCols - 1),
+    Math.min(STATE.rows - 1, destR + clipRows - 1)
+  );
+  updateSelActions();
+  autoSave();
+  render();
 }
 
 // ====== Background helpers ======
@@ -389,6 +512,24 @@ function render() {
   ctx.strokeStyle = 'rgba(255,255,255,0.3)';
   ctx.lineWidth = 1;
   ctx.strokeRect(ox + 0.5, oy + 0.5, STATE.cols * cs - 1, STATE.rows * cs - 1);
+
+  // Selection overlay
+  const sr = STATE.selDragging
+    ? normalizeSelRect(STATE.selDragC1, STATE.selDragR1, STATE.selDragC2, STATE.selDragR2)
+    : STATE.selRect;
+  if (sr) {
+    const sx = ox + sr.c1 * cs;
+    const sy2 = oy + sr.r1 * cs;
+    const sw = (sr.c2 - sr.c1 + 1) * cs;
+    const sh = (sr.r2 - sr.r1 + 1) * cs;
+    ctx.fillStyle = 'rgba(100,180,255,0.15)';
+    ctx.fillRect(sx, sy2, sw, sh);
+    ctx.strokeStyle = '#4af';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.strokeRect(sx + 0.5, sy2 + 0.5, sw - 1, sh - 1);
+    ctx.setLineDash([]);
+  }
 }
 
 // Draw a single dice cell
@@ -529,6 +670,9 @@ function paintAt(col, row) {
   STATE.lastPaintCol = col;
   STATE.lastPaintRow = row;
 
+  // Push history once per stroke (before first change)
+  if (!STATE.historyPushed) { pushHistory(); STATE.historyPushed = true; }
+
   // Always place with default variant when painting (dragging)
   const val = STATE.pip === 0 ? null : `${STATE.color}${STATE.pip}`;
   STATE.grid[row][col] = val;
@@ -552,8 +696,17 @@ wrap.addEventListener('mousedown', (e) => {
     STATE.panStartOX = STATE.offsetX;
     STATE.panStartOY = STATE.offsetY;
     wrap.classList.add('dragging');
+  } else if (STATE.tool === 'select' && e.button === 0) {
+    const { col, row } = screenToGrid(sx, sy);
+    STATE.selDragging = true;
+    STATE.selDragC1 = col; STATE.selDragR1 = row;
+    STATE.selDragC2 = col; STATE.selDragR2 = row;
+    STATE.selRect = null;
+    updateSelActions();
+    render();
   } else if (e.button === 0) {
     STATE.isPainting = true;
+    STATE.historyPushed = false;
     const { col, row } = screenToGrid(sx, sy);
     if (tryOrientCycle(col, row)) {
       // cycled orientation – mark cell as visited so drag doesn't re-paint it
@@ -577,6 +730,10 @@ window.addEventListener('mousemove', (e) => {
     STATE.offsetY = STATE.panStartOY + e.clientY - STATE.panStartY;
     clampViewport();
     render();
+  } else if (STATE.selDragging) {
+    const { col, row } = screenToGrid(sx, sy);
+    STATE.selDragC2 = col; STATE.selDragR2 = row;
+    render();
   } else if (STATE.isPainting) {
     const { col, row } = screenToGrid(sx, sy);
     paintAt(col, row);
@@ -592,8 +749,18 @@ window.addEventListener('mousemove', (e) => {
 });
 
 window.addEventListener('mouseup', (e) => {
+  if (STATE.selDragging) {
+    STATE.selDragging = false;
+    STATE.selRect = normalizeSelRect(
+      STATE.selDragC1, STATE.selDragR1,
+      STATE.selDragC2, STATE.selDragR2
+    );
+    updateSelActions();
+    render();
+  }
   STATE.isPanning = false;
   STATE.isPainting = false;
+  STATE.historyPushed = false;
   wrap.classList.remove('dragging');
 });
 
@@ -606,18 +773,32 @@ wrap.addEventListener('wheel', (e) => {
   zoomAround(factor, cx, cy);
 }, { passive: false });
 
-// Space pan
+// Keyboard shortcuts
 window.addEventListener('keydown', (e) => {
-  if (e.code === 'Space' && !e.target.matches('input, textarea')) {
+  if (e.target.matches('input, textarea')) return;
+  if (e.code === 'Space') {
     STATE.spaceDown = true;
     wrap.classList.add('panning');
     e.preventDefault();
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+    e.preventDefault();
+    undo();
+  }
+  if (e.code === 'Escape' && STATE.tool === 'select') {
+    STATE.selRect = null;
+    STATE.selDragging = false;
+    updateSelActions();
+    render();
+  }
+  if (e.code === 'Delete' && STATE.selRect) {
+    selDelete();
   }
 });
 window.addEventListener('keyup', (e) => {
   if (e.code === 'Space') {
     STATE.spaceDown = false;
-    wrap.classList.remove('panning');
+    if (STATE.tool !== 'pan') wrap.classList.remove('panning');
   }
 });
 
@@ -744,7 +925,16 @@ function setTool(tool) {
   STATE.tool = tool;
   document.getElementById('btn-pencil').classList.toggle('active', tool === 'pencil');
   document.getElementById('btn-pan').classList.toggle('active', tool === 'pan');
+  document.getElementById('btn-select').classList.toggle('active', tool === 'select');
   wrap.classList.toggle('panning', tool === 'pan');
+  wrap.style.cursor = tool === 'select' ? 'crosshair' : '';
+  // Clear selection when leaving select tool
+  if (tool !== 'select') {
+    STATE.selRect = null;
+    STATE.selDragging = false;
+    updateSelActions();
+    render();
+  }
 }
 
 // Background buttons
@@ -759,6 +949,16 @@ document.querySelectorAll('.bg-btn').forEach(btn => {
 
 document.getElementById('btn-pencil').addEventListener('click', () => setTool('pencil'));
 document.getElementById('btn-pan').addEventListener('click', () => setTool('pan'));
+document.getElementById('btn-select').addEventListener('click', () => setTool('select'));
+
+// Selection actions
+document.getElementById('btn-sel-delete').addEventListener('click', selDelete);
+document.getElementById('btn-sel-copy').addEventListener('click', selCopy);
+document.getElementById('btn-sel-paste').addEventListener('click', selPaste);
+
+// Undo
+document.getElementById('btn-undo').addEventListener('click', undo);
+document.getElementById('btn-undo').disabled = true;
 
 document.getElementById('btn-zoom-in').addEventListener('click', () => {
   const cx = canvas.width / 2, cy = canvas.height / 2;
@@ -789,6 +989,7 @@ document.getElementById('btn-apply-size').addEventListener('click', () => {
 
 document.getElementById('btn-clear').addEventListener('click', () => {
   if (!confirm('すべて消去しますか？')) return;
+  pushHistory();
   STATE.grid = initGrid(STATE.cols, STATE.rows);
   autoSave();
   render();
